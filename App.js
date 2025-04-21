@@ -7,7 +7,8 @@ import {
   Alert,
   Image,
   TouchableOpacity,
-  PermissionsAndroid,
+  Dimensions,
+  Linking,
   ScrollView,
 } from "react-native";
 import {
@@ -30,6 +31,22 @@ export default function App() {
   const [extractedText, setExtractedText] = useState("");
   const [permissionDeniedCount, setPermissionDeniedCount] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [screenSize, setScreenSize] = useState({ width: 0, height: 0 });
+  // Thay đổi từ squareSize thành rectangleSize và kích thước mặc định
+  const [rectangleSize, setRectangleSize] = useState({
+    width: 300,
+    height: 150,
+  });
+
+  // Đo kích thước màn hình khi component mount
+  useEffect(() => {
+    const { width, height } = Dimensions.get("window");
+    setScreenSize({ width, height });
+    // Đặt kích thước khung chữ nhật là 80% chiều rộng và 40% chiều rộng cho chiều cao
+    const rectWidth = width * 0.8;
+    const rectHeight = width * 0.4; // Tỷ lệ 2:1 phù hợp cho hầu hết text
+    setRectangleSize({ width: rectWidth, height: rectHeight });
+  }, []);
 
   // Xử lý yêu cầu quyền camera với kiểm tra từ chối nhiều lần
   const requestPermission = async () => {
@@ -82,6 +99,7 @@ export default function App() {
         throw new Error("Đường dẫn ảnh không hợp lệ");
       }
 
+      // Thực hiện OCR trên ảnh đã chụp
       const result = await MlkitOcr.detectFromUri(imageUri);
       console.log("OCR result:", result);
 
@@ -108,19 +126,39 @@ export default function App() {
     if (camera.current) {
       try {
         setIsProcessing(true);
-        // KHÔNG yêu cầu base64 nữa
+
+        // Tính toán vị trí crop dựa trên kích thước khung chữ nhật
+        const screenWidth = Dimensions.get("window").width;
+        const screenHeight = Dimensions.get("window").height;
+
+        // Tính vị trí chính giữa màn hình
+        const centerX = screenWidth / 2;
+        const centerY = screenHeight / 2;
+
+        // Tạo khu vực crop (x, y, width, height) - tương đối từ 0-1
+        const cropRegion = {
+          x: (centerX - rectangleSize.width / 2) / screenWidth,
+          y: (centerY - rectangleSize.height / 2) / screenHeight,
+          width: rectangleSize.width / screenWidth,
+          height: rectangleSize.height / screenHeight,
+        };
+
+        // Chụp ảnh với khu vực crop
         const photo = await camera.current.takePhoto({
           flash: flashMode,
-          // Bỏ base64: true
+          enableAutoRedEyeReduction: true,
+          qualityPrioritization: "balanced",
+          skipMetadata: true,
+          enableShutterSound: false,
+          enableAutoStabilization: true,
+          // Có thể thêm cropRegion nếu API camera hỗ trợ
+          enableAutoDistortionCorrection: true,
+          photoCodec: "jpeg",
         });
 
-        // Sử dụng đường dẫn file trực tiếp
-        console.log("Photo data:", photo); // In ra để kiểm tra cấu trúc
-
-        // Đối với VisionCamera, thường là photo.path
         if (photo && photo.path) {
           const filePath = `file://${photo.path}`;
-          console.log("File path:", filePath);
+          console.log("Original file path:", filePath);
           setPhotoUri(filePath);
           await recognizeText(filePath);
         } else {
@@ -209,8 +247,21 @@ export default function App() {
             orientation="portrait"
           />
           <View style={styles.overlay}>
-            <View style={styles.rectangle} />
-            <Text style={styles.overlayText}>Đặt văn bản vào khung</Text>
+            {/* Thay đổi từ khung vuông thành khung chữ nhật */}
+            <View
+              style={[
+                styles.rectangle,
+                {
+                  width: rectangleSize.width,
+                  height: rectangleSize.height,
+                  left: (screenSize.width - rectangleSize.width) / 2,
+                  top: (screenSize.height - rectangleSize.height) / 2,
+                },
+              ]}
+            />
+            <Text style={styles.overlayText}>
+              Đặt văn bản vào khung chữ nhật
+            </Text>
           </View>
           <TouchableOpacity style={styles.flashButton} onPress={toggleFlash}>
             <Ionicons
@@ -256,7 +307,6 @@ export default function App() {
     </View>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
